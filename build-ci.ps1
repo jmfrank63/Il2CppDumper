@@ -9,7 +9,7 @@ $configuration = 'Release'
 $outBase = Join-Path $PSScriptRoot 'Il2CppDumper\bin\Release'
 
 function Publish-Target {
-    param($tfm, $rid, $selfContained=$false, $trim=false, $singleFile=$false)
+    param($tfm, $rid, $selfContained=$false, $trim=$false, $singleFile=$false)
 
     $ridArg = if ($rid) { "-r $rid" } else { '' }
     $selfArg = if ($selfContained) { ' --self-contained ' } else { ' --no-self-contained ' }
@@ -18,7 +18,7 @@ function Publish-Target {
 
     $out = Join-Path $outBase "$tfm\publish\$rid"
     Write-Host "Publishing $tfm / $rid -> $out"
-    dotnet publish $project -c $configuration -f $tfm $ridArg -o $out $selfArg $trimArg $singleArg
+    dotnet publish $project -c $configuration -f $tfm $ridArg -o $out $selfArg $trimArg $singleArg --no-restore
     if ($LASTEXITCODE -ne 0) { throw "publish failed for $tfm / $rid" }
     return $out
 }
@@ -26,7 +26,7 @@ function Publish-Target {
 function Safe-Copy {
     param($src, $dst)
     if (Test-Path $src) {
-        New-Item -ItemType Directory -Force -Path (Split-Path $dst)
+        New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
         Copy-Item $src -Destination $dst -Force
         Write-Host "Copied $src -> $dst"
     } else {
@@ -34,9 +34,12 @@ function Safe-Copy {
     }
 }
 
-# Ensure restore
-& dotnet restore $project
-if ($LASTEXITCODE -ne 0) { throw 'dotnet restore failed' }
+# Ensure per-target restore to populate project.assets.json for each TFM
+foreach ($tfm in $TargetFrameworks) {
+    Write-Host "Restoring for $tfm"
+    dotnet restore $project -f $tfm
+    if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed for $tfm" }
+}
 
 $artifacts = @()
 foreach ($tfm in $TargetFrameworks) {
@@ -50,7 +53,7 @@ foreach ($tfm in $TargetFrameworks) {
     }
 }
 
-# Additional self-contained trimmed publishes for Windows x64/x86 (optional)
+# Additional self-contained trimmed publishes for Windows x64 (optional)
 try {
     $out = Publish-Target -tfm 'net6.0' -rid 'win-x64' -selfContained:$true -trim:$true -singleFile:$true
     $artifacts += $out
