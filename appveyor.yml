@@ -7,7 +7,12 @@ before_build:
   - ps: dotnet --info
 
 build_script:
-  - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File build-ci.ps1
+  - ps: |
+      choco install dotnetcore-sdk --version=6.0.425 -y || Write-Host "dotnet6 already present"
+      choco install dotnetcore-sdk --version=8.0.413 -y || Write-Host "dotnet8 already present"
+      dotnet --info
+  - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File build-ci.ps1 -TargetFrameworks "net6.0"
+  - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File build-ci.ps1 -TargetFrameworks "net8.0"
 
 artifacts:
   - path: Il2CppDumper\bin\Release\published\**\*
