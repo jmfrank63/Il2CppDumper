@@ -18,7 +18,7 @@ function Publish-Target {
 
     $out = Join-Path $outBase "$tfm\publish\$rid"
     Write-Host "Publishing $tfm / $rid -> $out"
-    $cmd = "dotnet publish `"$project`" -c $configuration -f $tfm $ridArg -o `"$out`" $selfArg $trimArg $singleArg --no-restore"
+    $cmd = "dotnet publish `"$project`" -c $configuration -f $tfm $ridArg -o `"$out`" $selfArg $trimArg $singleArg"
     Write-Host "Running: $cmd"
     $output = iex $cmd 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -39,11 +39,6 @@ function Safe-Copy {
         Write-Host "Skipping missing file $src"
     }
 }
-
-# Single restore for the project (populates assets for all target frameworks)
-Write-Host "Running dotnet restore for project"
-dotnet restore $project
-if ($LASTEXITCODE -ne 0) { throw 'dotnet restore failed' }
 
 $artifacts = @()
 $publishFailures = @()
