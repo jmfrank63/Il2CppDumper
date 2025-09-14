@@ -18,8 +18,14 @@ function Publish-Target {
 
     $out = Join-Path $outBase "$tfm\publish\$rid"
     Write-Host "Publishing $tfm / $rid -> $out"
-    dotnet publish $project -c $configuration -f $tfm $ridArg -o $out $selfArg $trimArg $singleArg --no-restore
-    if ($LASTEXITCODE -ne 0) { throw "publish failed for $tfm / $rid" }
+    $cmd = "dotnet publish `"$project`" -c $configuration -f $tfm $ridArg -o `"$out`" $selfArg $trimArg $singleArg --no-restore"
+    Write-Host "Running: $cmd"
+    $output = iex $cmd 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Publish command failed. Output:";
+        $output | ForEach-Object { Write-Host $_ }
+        throw "publish failed for $tfm / $rid"
+    }
     return $out
 }
 
