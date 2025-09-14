@@ -4,9 +4,9 @@ Param(
 )
 
 Set-StrictMode -Version Latest
-$project = Join-Path $PSScriptRoot 'Il2CppDumper\Il2CppDumper.csproj'
+$project = Join-Path $PSScriptRoot 'Il2CppDumper\\Il2CppDumper.csproj'
 $configuration = 'Release'
-$outBase = Join-Path $PSScriptRoot 'Il2CppDumper\bin\Release'
+$outBase = Join-Path $PSScriptRoot 'Il2CppDumper\\bin\\Release'
 
 function Publish-Target {
     param($tfm, $rid, $selfContained=$false, $trim=$false, $singleFile=$false)
@@ -48,7 +48,7 @@ foreach ($tfm in $TargetFrameworks) {
             $out = Publish-Target -tfm $tfm -rid $rid -selfContained:$false -singleFile:$true
             $artifacts += $out
         } catch {
-            Write-Host "Publish failed for $tfm/$rid: $_"
+            Write-Host "Publish failed for $($tfm)/$($rid): $($_)"
         }
     }
 }
@@ -57,7 +57,7 @@ foreach ($tfm in $TargetFrameworks) {
 try {
     $out = Publish-Target -tfm 'net6.0' -rid 'win-x64' -selfContained:$true -trim:$true -singleFile:$true
     $artifacts += $out
-} catch { Write-Host "Optional self-contained publish failed: $_" }
+} catch { Write-Host "Optional self-contained publish failed: $($_)" }
 
 # Copy or prepare artifact outputs
 $finalDir = Join-Path $outBase 'published'
