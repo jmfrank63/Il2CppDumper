@@ -34,21 +34,22 @@ function Safe-Copy {
     }
 }
 
-# Ensure per-target restore to populate project.assets.json for each TFM
-foreach ($tfm in $TargetFrameworks) {
-    Write-Host "Restoring for $tfm"
-    dotnet restore $project --framework $tfm
-    if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed for $tfm" }
-}
+# Single restore for the project (populates assets for all target frameworks)
+Write-Host "Running dotnet restore for project"
+dotnet restore $project
+if ($LASTEXITCODE -ne 0) { throw 'dotnet restore failed' }
 
 $artifacts = @()
+$publishFailures = @()
 foreach ($tfm in $TargetFrameworks) {
     foreach ($rid in $Rids) {
         try {
             $out = Publish-Target -tfm $tfm -rid $rid -selfContained:$false -singleFile:$true
             $artifacts += $out
         } catch {
-            Write-Host "Publish failed for $($tfm)/$($rid): $($_)"
+            $err = "Publish failed for $($tfm)/$($rid): $($_)"
+            Write-Host $err
+            $publishFailures += $err
         }
     }
 }
@@ -57,7 +58,16 @@ foreach ($tfm in $TargetFrameworks) {
 try {
     $out = Publish-Target -tfm 'net6.0' -rid 'win-x64' -selfContained:$true -trim:$true -singleFile:$true
     $artifacts += $out
-} catch { Write-Host "Optional self-contained publish failed: $($_)" }
+} catch {
+    Write-Host "Optional self-contained publish failed: $($_)"
+}
+
+# If any mandatory publish failed, exit with non-zero to fail CI
+if ($publishFailures.Count -gt 0) {
+    Write-Host "One or more publishes failed. Failing the CI."
+    $publishFailures | ForEach-Object { Write-Host $_ }
+    exit 1
+}
 
 # Copy or prepare artifact outputs
 $finalDir = Join-Path $outBase 'published'
@@ -73,5 +83,4 @@ foreach ($a in $artifacts | Sort-Object -Unique) {
 Write-Host "Published artifacts to $finalDir"
 Write-Host "##[set-output name=artifact-path]$finalDir"
 
-# Keep exit code 0 to allow CI to collect artifacts even if some publishes failed
 exit 0
