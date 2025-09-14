@@ -37,7 +37,7 @@ function Safe-Copy {
 # Ensure per-target restore to populate project.assets.json for each TFM
 foreach ($tfm in $TargetFrameworks) {
     Write-Host "Restoring for $tfm"
-    dotnet restore $project -f $tfm
+    dotnet restore $project --framework $tfm
     if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed for $tfm" }
 }
 
