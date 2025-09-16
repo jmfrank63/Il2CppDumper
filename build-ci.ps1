@@ -36,7 +36,7 @@ function Normalize-Rids {
         }
         foreach ($p in $parts) {
             # remove surrounding quotes
-            $p2 = $p.Trim("'\" ")
+            $p2 = $p.Trim([char[]]@("'", '"', ' '))
             if (-not [string]::IsNullOrWhiteSpace($p2)) { $clean += $p2 }
         }
     }
