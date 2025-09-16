@@ -1,12 +1,51 @@
 Param(
     [string[]]$TargetFrameworks = @('net8.0'),
-    [string[]]$Rids = @('win-x86','win-x64')
+    [Parameter(ValueFromPipeline=$true)]
+    [object]$Rids = @('win-x86','win-x64')
 )
 
 Set-StrictMode -Version Latest
 $project = Join-Path $PSScriptRoot 'Il2CppDumper\\Il2CppDumper.csproj'
 $configuration = 'Release'
 $outBase = Join-Path $PSScriptRoot 'Il2CppDumper\\bin\\Release'
+
+# Normalize RIDs: accept arrays, single strings, PowerShell array literal strings like @('win-x64'), or comma-separated lists
+function Normalize-Rids {
+    param($input)
+    if ($null -eq $input) { return @() }
+    if ($input -is [System.Array]) {
+        $items = $input | ForEach-Object { $_.ToString() }
+    } else {
+        $items = @($input.ToString())
+    }
+    $clean = @()
+    foreach ($it in $items) {
+        if ([string]::IsNullOrWhiteSpace($it)) { continue }
+        $s = $it.Trim()
+        # strip PowerShell array literal wrappers like @('win-x64') or @("win-x64")
+        if ($s -match '^\@\((.*)\)$') {
+            $inner = $matches[1]
+            # split on comma, preserving quoted tokens
+            $parts = ($inner -split ',') | ForEach-Object { $_.Trim() }
+        }
+        elseif ($s.Contains(',')) {
+            $parts = ($s -split ',') | ForEach-Object { $_.Trim() }
+        }
+        else {
+            $parts = @($s)
+        }
+        foreach ($p in $parts) {
+            # remove surrounding quotes
+            $p2 = $p.Trim("'\" ")
+            if (-not [string]::IsNullOrWhiteSpace($p2)) { $clean += $p2 }
+        }
+    }
+    # ensure unique
+    return $clean | Select-Object -Unique
+}
+
+$Rids = Normalize-Rids -input $Rids
+if ($Rids.Count -eq 0) { $Rids = @('win-x86','win-x64') }
 
 # Clean previous restore artifacts to avoid stale project.assets.json
 $projectObj = Join-Path (Split-Path $project) 'obj'
