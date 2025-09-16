@@ -53,19 +53,18 @@ function Run-RestoreForTfm {
 }
 
 function Publish-Target {
-    param($tfm, $rid, $selfContained=$false, $trim=$false, $singleFile=$false)
+    param($tfm, $rid, $selfContained=$false)
 
     # Ensure per-TFM+RID assets exist
     Run-RestoreForTfm -tfm $tfm -rid $rid
 
     $ridArg = if ($rid) { "-r $rid" } else { '' }
     $selfArg = if ($selfContained) { ' --self-contained ' } else { ' --no-self-contained ' }
-    $trimArg = if ($trim) { ' -p:PublishTrimmed=true ' } else { '' }
-    $singleArg = if ($singleFile) { ' -p:PublishSingleFile=true ' } else { '' }
 
     $out = Join-Path $outBase "$tfm\publish\$rid"
     Write-Host "Publishing $tfm / $rid -> $out"
-    $cmd = "dotnet publish `"$project`" -c $configuration -f $tfm $ridArg -o `"$out`" $selfArg $trimArg $singleArg --no-restore"
+    # Framework-dependent publish (no single-file, no trimming) to avoid runtime pack/workload requirements on CI
+    $cmd = "dotnet publish `"$project`" -c $configuration -f $tfm $ridArg -o `"$out`" $selfArg --no-restore"
     Write-Host "Running: $cmd"
     $output = iex $cmd 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -92,7 +91,7 @@ $publishFailures = @()
 foreach ($tfm in $TargetFrameworks) {
     foreach ($rid in $Rids) {
         try {
-            $out = Publish-Target -tfm $tfm -rid $rid -selfContained:$false -singleFile:$true
+            $out = Publish-Target -tfm $tfm -rid $rid -selfContained:$false
             $artifacts += $out
         } catch {
             $err = "Publish failed for $($tfm)/$($rid): $($_)"
@@ -100,15 +99,6 @@ foreach ($tfm in $TargetFrameworks) {
             $publishFailures += $err
         }
     }
-}
-
-# Additional self-contained trimmed publishes for Windows x64 (optional)
-try {
-    Run-RestoreForTfm -tfm 'net8.0' -rid 'win-x64'
-    $out = Publish-Target -tfm 'net8.0' -rid 'win-x64' -selfContained:$true -trim:$true -singleFile:$true
-    $artifacts += $out
-} catch {
-    Write-Host "Optional self-contained publish failed: $($_)"
 }
 
 # If any mandatory publish failed, exit with non-zero to fail CI
