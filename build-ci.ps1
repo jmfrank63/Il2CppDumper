@@ -1,51 +1,11 @@
 Param(
-    [string[]]$TargetFrameworks = @('net8.0'),
-    [Parameter(ValueFromPipeline=$true)]
-    [object]$Rids = @('win-x86','win-x64')
+    [string[]]$TargetFrameworks = @('net8.0')
 )
 
 Set-StrictMode -Version Latest
 $project = Join-Path $PSScriptRoot 'Il2CppDumper\\Il2CppDumper.csproj'
 $configuration = 'Release'
 $outBase = Join-Path $PSScriptRoot 'Il2CppDumper\\bin\\Release'
-
-# Normalize RIDs: accept arrays, single strings, PowerShell array literal strings like @('win-x64'), or comma-separated lists
-function Normalize-Rids {
-    param($input)
-    if ($null -eq $input) { return @() }
-    if ($input -is [System.Array]) {
-        $items = $input | ForEach-Object { $_.ToString() }
-    } else {
-        $items = @($input.ToString())
-    }
-    $clean = @()
-    foreach ($it in $items) {
-        if ([string]::IsNullOrWhiteSpace($it)) { continue }
-        $s = $it.Trim()
-        # strip PowerShell array literal wrappers like @('win-x64') or @("win-x64")
-        if ($s -match '^\@\((.*)\)$') {
-            $inner = $matches[1]
-            # split on comma, preserving quoted tokens
-            $parts = ($inner -split ',') | ForEach-Object { $_.Trim() }
-        }
-        elseif ($s.Contains(',')) {
-            $parts = ($s -split ',') | ForEach-Object { $_.Trim() }
-        }
-        else {
-            $parts = @($s)
-        }
-        foreach ($p in $parts) {
-            # remove surrounding quotes
-            $p2 = $p.Trim([char[]]@("'", '"', ' '))
-            if (-not [string]::IsNullOrWhiteSpace($p2)) { $clean += $p2 }
-        }
-    }
-    # ensure unique
-    return $clean | Select-Object -Unique
-}
-
-$Rids = Normalize-Rids -input $Rids
-if ($Rids.Count -eq 0) { $Rids = @('win-x86','win-x64') }
 
 # Clean previous restore artifacts to avoid stale project.assets.json
 $projectObj = Join-Path (Split-Path $project) 'obj'
@@ -61,55 +21,48 @@ if (Test-Path $projectBin) {
 }
 
 function Run-RestoreForTfm {
-    param($tfm, $rid=$null)
+    param($tfm)
 
-    if ($rid) {
-        Write-Host "Attempting dotnet restore for $tfm/$rid"
-        $restoreCmd = "dotnet restore `"$project`" --runtime $rid --framework $tfm"
-        Write-Host "Running: $restoreCmd"
-        $restoreOutput = iex $restoreCmd 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "dotnet restore succeeded for $tfm/$rid"
-            return
-        }
-        Write-Host "dotnet restore failed for $tfm/$rid, falling back to msbuild restore. Output:";
-        $restoreOutput | ForEach-Object { Write-Host $_ }
-        # Fallback
-        Write-Host "Restoring assets for $tfm/$rid using dotnet msbuild Restore"
-        $restoreCmd = "dotnet msbuild `"$project`" -t:Restore -p:TargetFramework=$tfm -p:RuntimeIdentifier=$rid"
+    Write-Host "Attempting dotnet restore for $tfm"
+    $restoreCmd = "dotnet restore `"$project`" --framework $tfm"
+    Write-Host "Running: $restoreCmd"
+    $restoreOutput = iex $restoreCmd 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "dotnet restore succeeded for $tfm"
+        return
     }
-    else {
-        Write-Host "Attempting dotnet restore for $tfm"
-        $restoreCmd = "dotnet restore `"$project`" --framework $tfm"
-    }
+    Write-Host "dotnet restore failed for $tfm, falling back to msbuild restore. Output:";
+    $restoreOutput | ForEach-Object { Write-Host $_ }
+    # Fallback
+    Write-Host "Restoring assets for $tfm using dotnet msbuild Restore"
+    $restoreCmd = "dotnet msbuild `"$project`" -t:Restore -p:TargetFramework=$tfm"
     Write-Host "Running: $restoreCmd"
     $restoreOutput = iex $restoreCmd 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Restore command failed. Output:";
         $restoreOutput | ForEach-Object { Write-Host $_ }
-        throw "restore failed for $tfm/$rid"
+        throw "restore failed for $tfm"
     }
 }
 
 function Publish-Target {
-    param($tfm, $rid, $selfContained=$false)
+    param($tfm, $selfContained=$false)
 
-    # Ensure per-TFM+RID assets exist
-    Run-RestoreForTfm -tfm $tfm -rid $rid
+    # Ensure per-TFM assets exist
+    Run-RestoreForTfm -tfm $tfm
 
-    $ridArg = if ($rid) { "-r $rid" } else { '' }
     $selfArg = if ($selfContained) { ' --self-contained ' } else { ' --no-self-contained ' }
 
-    $out = Join-Path $outBase "$tfm\publish\$rid"
-    Write-Host "Publishing $tfm / $rid -> $out"
+    $out = Join-Path $outBase "$tfm\publish"
+    Write-Host "Publishing $tfm -> $out"
     # Framework-dependent publish (no single-file, no trimming) to avoid runtime pack/workload requirements on CI
-    $cmd = "dotnet publish `"$project`" -c $configuration -f $tfm $ridArg -o `"$out`" $selfArg --no-restore"
+    $cmd = "dotnet publish `"$project`" -c $configuration -f $tfm -o `"$out`" $selfArg --no-restore"
     Write-Host "Running: $cmd"
     $output = iex $cmd 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Publish command failed. Output:";
         $output | ForEach-Object { Write-Host $_ }
-        throw "publish failed for $tfm / $rid"
+        throw "publish failed for $tfm"
     }
     return $out
 }
@@ -128,15 +81,13 @@ function Safe-Copy {
 $artifacts = @()
 $publishFailures = @()
 foreach ($tfm in $TargetFrameworks) {
-    foreach ($rid in $Rids) {
-        try {
-            $out = Publish-Target -tfm $tfm -rid $rid -selfContained:$false
-            $artifacts += $out
-        } catch {
-            $err = "Publish failed for $($tfm)/$($rid): $($_)"
-            Write-Host $err
-            $publishFailures += $err
-        }
+    try {
+        $out = Publish-Target -tfm $tfm -selfContained:$false
+        $artifacts += $out
+    } catch {
+        $err = "Publish failed for $($tfm): $($_)"
+        Write-Host $err
+        $publishFailures += $err
     }
 }
 
