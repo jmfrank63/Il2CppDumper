@@ -7,6 +7,14 @@ before_build:
   - ps: dotnet --info
 
 build_script:
+  - ps: |
+      Write-Host "Attempting to install .NET 9 SDK via winget (if available)"
+      try {
+        winget install --id Microsoft.DotNet.SDK.9 -e --silent
+      } catch {
+        Write-Host "winget install failed or not available; continuing with preinstalled SDKs"
+      }
+      dotnet --info
   - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File build-ci.ps1 -TargetFrameworks "net8.0"
   - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File build-ci.ps1 -TargetFrameworks "net9.0" -Rids @('win-x64')
 
