@@ -1,5 +1,5 @@
 Param(
-    [string[]]$TargetFrameworks = @('net6.0','net8.0'),
+    [string[]]$TargetFrameworks = @('net8.0'),
     [string[]]$Rids = @('win-x86','win-x64')
 )
 
@@ -8,8 +8,55 @@ $project = Join-Path $PSScriptRoot 'Il2CppDumper\\Il2CppDumper.csproj'
 $configuration = 'Release'
 $outBase = Join-Path $PSScriptRoot 'Il2CppDumper\\bin\\Release'
 
+# Clean previous restore artifacts to avoid stale project.assets.json
+$projectObj = Join-Path (Split-Path $project) 'obj'
+if (Test-Path $projectObj) {
+    Write-Host "Removing stale obj folder: $projectObj"
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $projectObj
+}
+
+$projectBin = Join-Path (Split-Path $project) 'bin'
+if (Test-Path $projectBin) {
+    Write-Host "Removing stale bin folder: $projectBin"
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $projectBin
+}
+
+function Run-RestoreForTfm {
+    param($tfm, $rid=$null)
+
+    if ($rid) {
+        Write-Host "Attempting dotnet restore for $tfm/$rid"
+        $restoreCmd = "dotnet restore `"$project`" --runtime $rid --framework $tfm"
+        Write-Host "Running: $restoreCmd"
+        $restoreOutput = iex $restoreCmd 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "dotnet restore succeeded for $tfm/$rid"
+            return
+        }
+        Write-Host "dotnet restore failed for $tfm/$rid, falling back to msbuild restore. Output:";
+        $restoreOutput | ForEach-Object { Write-Host $_ }
+        # Fallback
+        Write-Host "Restoring assets for $tfm/$rid using dotnet msbuild Restore"
+        $restoreCmd = "dotnet msbuild `"$project`" -t:Restore -p:TargetFramework=$tfm -p:RuntimeIdentifier=$rid"
+    }
+    else {
+        Write-Host "Attempting dotnet restore for $tfm"
+        $restoreCmd = "dotnet restore `"$project`" --framework $tfm"
+    }
+    Write-Host "Running: $restoreCmd"
+    $restoreOutput = iex $restoreCmd 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Restore command failed. Output:";
+        $restoreOutput | ForEach-Object { Write-Host $_ }
+        throw "restore failed for $tfm/$rid"
+    }
+}
+
 function Publish-Target {
     param($tfm, $rid, $selfContained=$false, $trim=$false, $singleFile=$false)
+
+    # Ensure per-TFM+RID assets exist
+    Run-RestoreForTfm -tfm $tfm -rid $rid
 
     $ridArg = if ($rid) { "-r $rid" } else { '' }
     $selfArg = if ($selfContained) { ' --self-contained ' } else { ' --no-self-contained ' }
@@ -18,7 +65,7 @@ function Publish-Target {
 
     $out = Join-Path $outBase "$tfm\publish\$rid"
     Write-Host "Publishing $tfm / $rid -> $out"
-    $cmd = "dotnet publish `"$project`" -c $configuration -f $tfm $ridArg -o `"$out`" $selfArg $trimArg $singleArg"
+    $cmd = "dotnet publish `"$project`" -c $configuration -f $tfm $ridArg -o `"$out`" $selfArg $trimArg $singleArg --no-restore"
     Write-Host "Running: $cmd"
     $output = iex $cmd 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -57,7 +104,8 @@ foreach ($tfm in $TargetFrameworks) {
 
 # Additional self-contained trimmed publishes for Windows x64 (optional)
 try {
-    $out = Publish-Target -tfm 'net6.0' -rid 'win-x64' -selfContained:$true -trim:$true -singleFile:$true
+    Run-RestoreForTfm -tfm 'net8.0' -rid 'win-x64'
+    $out = Publish-Target -tfm 'net8.0' -rid 'win-x64' -selfContained:$true -trim:$true -singleFile:$true
     $artifacts += $out
 } catch {
     Write-Host "Optional self-contained publish failed: $($_)"
